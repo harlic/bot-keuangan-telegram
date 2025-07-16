@@ -1,1 +1,21 @@
+# Abaikan file kredensial rahasia
 credentials.json
+
+# File dan folder dari Replit
+*.replit
+.replit/
+.replit hidden/
+.replit.nix
+.replit.nix.lock
+
+# Folder cache Python
+__pycache__/
+*.py[cod]
+
+# File environment dan log
+.env
+*.log
+
+# File proyek Python tambahan
+poetry.lock
+pip-log.txt
