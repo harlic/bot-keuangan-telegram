@@ -1,0 +1,6 @@
+python-3.11.8
+python-telegram-bot==20.6
+gspread
+oauth2client
+flask
+python-dotenv
