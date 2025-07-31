@@ -93,4 +93,4 @@ Sheet:
 
 ## 💬 Lisensi
 
-MIT License. Silakan gunakan, modifikasi, dan sebarkan sesuai kebutuhan.
+Silakan gunakan, modifikasi, dan sebarkan sesuai kebutuhan.
