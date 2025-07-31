@@ -86,6 +86,8 @@ Sheet:
 
 <img width="863" height="441" alt="image" src="https://github.com/user-attachments/assets/dfe91d16-3f76-4e61-9da4-faebff60b549" />
 
+<img width="896" height="570" alt="image" src="https://github.com/user-attachments/assets/8fcb8b7d-047a-4991-993b-a01191bd7df9" />
+
 
 ---
 
