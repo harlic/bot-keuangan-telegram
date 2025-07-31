@@ -1,0 +1,8 @@
+python-telegram-bot==20.3
+gspread==5.11.1
+oauth2client==4.1.3
+python-dotenv==1.0.1
+telegram
+pytz
+apscheduler
+google-auth
