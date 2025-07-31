@@ -106,11 +106,12 @@ async def rekap_periode(update: Update, context: ContextTypes.DEFAULT_TYPE, peri
             return
 
         filtered = [row for row in data if datetime.strptime(row[0], "%Y-%m-%d") >= start_date]
-        total = sum(int(row[1]) for row in filtered)
+        total = sum(int(row[1].replace(",", "").strip()) for row in filtered)
 
         kategori_rekap = {}
         for row in filtered:
-            kategori_rekap[row[3]] = kategori_rekap.get(row[3], 0) + int(row[1])
+            angka = int(row[1].replace(",", "").strip())
+            kategori_rekap[row[3]] = kategori_rekap.get(row[3], 0) + angka
 
         msg = f"📊 Rekap {periode.capitalize()} (mulai {start_date.strftime('%Y-%m-%d')}):\n"
         for kategori, jumlah in kategori_rekap.items():
