@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import logging
+import asyncio
 from datetime import datetime, timedelta
 
 from flask import Flask, request
@@ -15,46 +16,49 @@ from telegram.ext import (
     MessageHandler, ContextTypes, filters
 )
 
-# Load environment variables
+# --- Load ENV ---
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SPREADSHEET_NAME = os.getenv("SPREADSHEET_NAME")
 KATEGORI_SHEET = os.getenv("KATEGORI_SHEET", "Kategori")
 DATA_SHEET = os.getenv("DATA_SHEET", "Sheet1")
 encoded_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # e.g., https://your-app.onrender.com/webhook
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # e.g. https://your-app.onrender.com
 
-# Flask setup
-flask_app = Flask(__name__)
+# --- Flask Setup ---
+app_flask = Flask(__name__)
 
-@flask_app.route('/')
+@app_flask.route('/')
 def home():
     return "Bot Keuangan Aktif 🚀"
 
-@flask_app.route('/ping')
+@app_flask.route('/ping')
 def ping():
     return "pong"
 
-# Logging
+# --- Logging ---
 logging.basicConfig(level=logging.INFO)
 
-# Google Sheets setup
+# --- Google Sheets Setup ---
 try:
     decoded_json = base64.b64decode(encoded_json).decode("utf-8")
     service_account_info = json.loads(decoded_json)
-    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
     creds = Credentials.from_service_account_info(service_account_info, scopes=scopes)
     gc = gspread.authorize(creds)
 
     sheet = gc.open(SPREADSHEET_NAME).worksheet(DATA_SHEET)
     kategori_sheet = gc.open(SPREADSHEET_NAME).worksheet(KATEGORI_SHEET)
-    kategori_values = kategori_sheet.col_values(1)[1:]
+    kategori_values = kategori_sheet.col_values(1)[1:]  # kolom A tanpa header
     kategori_list = [k.strip().lower() for k in kategori_values if k.strip()]
 except Exception as e:
     logging.error("❌ Gagal inisialisasi Google Sheets:", exc_info=e)
     raise SystemExit("❌ Gagal memuat Google credentials.")
 
-# Handlers
+# --- Handler ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Halo! Kirim catatan keuangan kamu dengan format:\n\n"
@@ -133,36 +137,40 @@ async def rekap_mingguan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def rekap_bulanan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await rekap_periode(update, context, "bulanan")
 
-# Telegram Application
-application = Application.builder().token(BOT_TOKEN).build()
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CommandHandler("kategori", show_kategori))
-application.add_handler(CommandHandler("rekapminggu", rekap_mingguan))
-application.add_handler(CommandHandler("rekapbulan", rekap_bulanan))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-# Webhook route
-@flask_app.route("/webhook", methods=["POST"])
+# --- Webhook Handler ---
+@app_flask.route("/webhook", methods=["POST"])
 def webhook():
-    request_data = request.get_json(force=True)
-    update = Update.de_json(request_data, application.bot)
-
     try:
-        import asyncio
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(application.initialize())
-        loop.run_until_complete(application.process_update(update))
-        loop.run_until_complete(application.shutdown())
+        request_data = request.get_json(force=True)
+        update = Update.de_json(request_data, bot.application.bot)
+
+        # Gunakan loop yang aktif tanpa ditutup
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        loop.create_task(bot.application.process_update(update))
+        return "OK"
     except Exception as e:
         logging.error("❌ Webhook error:", exc_info=e)
-        return "Internal Server Error", 500
+        return "Webhook Error", 500
 
-    return "OK", 200
+# --- Bot Init ---
+bot = Application.builder().token(BOT_TOKEN).build()
+bot.add_handler(CommandHandler("start", start))
+bot.add_handler(CommandHandler("kategori", show_kategori))
+bot.add_handler(CommandHandler("rekapminggu", rekap_mingguan))
+bot.add_handler(CommandHandler("rekapbulan", rekap_bulanan))
+bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-# Set webhook saat startup
-if __name__ == '__main__':
-    import asyncio
-    asyncio.run(application.bot.set_webhook(url=f"{WEBHOOK_URL}/webhook"))
+# --- Set Webhook dan Jalankan Flask ---
+async def main():
+    await bot.bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
+    logging.info("✅ Webhook set to: %s/webhook", WEBHOOK_URL)
+
+if __name__ == "__main__":
+    asyncio.run(main())
     port = int(os.environ.get("PORT", 10000))
-    flask_app.run(host="0.0.0.0", port=port)
+    app_flask.run(host="0.0.0.0", port=port)
