@@ -1,176 +1,124 @@
-import os
-import json
-import base64
-import logging
-import asyncio
+import os, json, base64, logging, asyncio
 from datetime import datetime, timedelta
-
 from flask import Flask, request
 from dotenv import load_dotenv
 import gspread
 from google.oauth2.service_account import Credentials
-
 from telegram import Update
-from telegram.ext import (
-    Application, CommandHandler,
-    MessageHandler, ContextTypes, filters
-)
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
-# --- Load ENV ---
+# --- Load environment ---
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SPREADSHEET_NAME = os.getenv("SPREADSHEET_NAME")
 KATEGORI_SHEET = os.getenv("KATEGORI_SHEET", "Kategori")
 DATA_SHEET = os.getenv("DATA_SHEET", "Sheet1")
-encoded_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # e.g. https://your-app.onrender.com
+encoded = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-# --- Flask Setup ---
-app_flask = Flask(__name__)
+# --- Initialize Flask ---
+app = Flask(__name__)
 
-@app_flask.route('/')
+@app.route('/')
 def home():
     return "Bot Keuangan Aktif 🚀"
 
-@app_flask.route('/ping')
+@app.route('/ping')
 def ping():
     return "pong"
 
 # --- Logging ---
 logging.basicConfig(level=logging.INFO)
 
-# --- Google Sheets Setup ---
+# --- Init Google Sheets ---
 try:
-    decoded_json = base64.b64decode(encoded_json).decode("utf-8")
-    service_account_info = json.loads(decoded_json)
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    creds = Credentials.from_service_account_info(service_account_info, scopes=scopes)
+    creds_json = json.loads(base64.b64decode(encoded).decode())
+    creds = Credentials.from_service_account_info(
+        creds_json,
+        scopes=[
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive"
+        ]
+    )
     gc = gspread.authorize(creds)
-
     sheet = gc.open(SPREADSHEET_NAME).worksheet(DATA_SHEET)
-    kategori_sheet = gc.open(SPREADSHEET_NAME).worksheet(KATEGORI_SHEET)
-    kategori_values = kategori_sheet.col_values(1)[1:]  # kolom A tanpa header
-    kategori_list = [k.strip().lower() for k in kategori_values if k.strip()]
+    kategori = gc.open(SPREADSHEET_NAME).worksheet(KATEGORI_SHEET)
+    kategori_list = [c.strip().lower() for c in kategori.col_values(1)[1:] if c.strip()]
 except Exception as e:
-    logging.error("❌ Gagal inisialisasi Google Sheets:", exc_info=e)
-    raise SystemExit("❌ Gagal memuat Google credentials.")
+    logging.error("❌ Google Sheets init error:", exc_info=e)
+    raise SystemExit("Failed loading Google credentials")
 
-# --- Handler ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# --- Telegram handlers ---
+async def start_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Halo! Kirim catatan keuangan kamu dengan format:\n\n"
-        "<jumlah> <deskripsi> #kategori\n\n"
-        "Contoh:\n15000 beli kopi #makan"
+        "Halo! Kirim catatan keuangan kamu:\n<jumlah> <deskripsi> #kategori"
     )
 
-async def show_kategori(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        msg = "*📂 Daftar Kategori:*\n"
-        msg += "\n".join(f"- {k.title()}" for k in kategori_list)
-        await update.message.reply_text(msg, parse_mode="Markdown")
-    except Exception as e:
-        logging.error(f"Error show kategori: {e}")
-        await update.message.reply_text("❌ Gagal mengambil daftar kategori.")
+async def listkategori(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = "*Daftar Kategori:*\n" + "\n".join(f"- {k.title()}" for k in kategori_list)
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         parts = update.message.text.strip().split()
-        amount = int(parts[0])
-        hashtag_index = next(i for i, p in enumerate(parts) if p.startswith("#"))
-        description = " ".join(parts[1:hashtag_index])
-        category_raw = " ".join(parts[hashtag_index:])[1:].strip().lower()
-
-        if category_raw not in kategori_list:
-            await update.message.reply_text(
-                f"❌ Kategori *{category_raw}* tidak ditemukan!\nGunakan /kategori untuk melihat daftar.",
-                parse_mode="Markdown"
-            )
+        amount = int(parts[0].replace(",", ""))
+        hashtag_index = next(i for i,p in enumerate(parts) if p.startswith("#"))
+        desc = " ".join(parts[1:hashtag_index])
+        cat = " ".join(parts[hashtag_index:])[1:].strip().lower()
+        if cat not in kategori_list:
+            await update.message.reply_text(f"❌ Kategori *{cat}* tidak ada", parse_mode="Markdown")
             return
-
-        tanggal = datetime.now().strftime("%Y-%m-%d")
-        sheet.append_row([tanggal, amount, description, category_raw])
+        today = datetime.now().strftime("%Y-%m-%d")
+        sheet.append_row([today, amount, desc, cat])
         await update.message.reply_text("✅ Tersimpan!")
-    except ValueError:
-        await update.message.reply_text("❌ Jumlah harus berupa angka di awal.")
-    except StopIteration:
-        await update.message.reply_text("❌ Format salah! Gunakan tanda `#kategori` di akhir.", parse_mode="Markdown")
-    except Exception as e:
-        logging.error(f"Error handle_message: {e}")
-        await update.message.reply_text("❌ Terjadi kesalahan. Coba lagi ya!")
+    except Exception:
+        await update.message.reply_text("❌ Format salah. Cth: `15000 beli kopi #makan`", parse_mode="Markdown")
 
-async def rekap_periode(update: Update, context: ContextTypes.DEFAULT_TYPE, periode: str):
+async def rekap_per(update: Update, context: ContextTypes.DEFAULT_TYPE, periode: str):
+    data = sheet.get_all_values()[1:]
+    start = datetime.now() - timedelta(days=datetime.now().weekday()) if periode=="mingguan" else datetime.now().replace(day=1)
+    filt = [r for r in data if datetime.strptime(r[0], "%Y-%m-%d") >= start]
+    total = sum(int(r[1].replace(",", "")) for r in filt)
+    bycat = {}
+    for r in filt:
+        bycat[r[3]] = bycat.get(r[3],0) + int(r[1].replace(",", ""))
+    msg = f"📊 Rekap {periode.capitalize()} sejak {start.strftime('%Y-%m-%d')}:\n"
+    for k,v in bycat.items(): msg += f"- {k.title()}: Rp{v:,}\n"
+    msg += f"\nTotal: Rp{total:,}"
+    await update.message.reply_text(msg)
+
+async def rekap_mingguan_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await rekap_per(update, context, "mingguan")
+
+async def rekap_bulanan_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await rekap_per(update, context, "bulanan")
+
+# --- Build Telegram application ---
+application = Application.builder().token(BOT_TOKEN).build()
+application.add_handler(CommandHandler("start", start_cb))
+application.add_handler(CommandHandler("kategori", listkategori))
+application.add_handler(CommandHandler("rekapminggu", rekap_mingguan_cb))
+application.add_handler(CommandHandler("rekapbulan", rekap_bulanan_cb))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
+
+# --- Webhook endpoint ---
+@app.route('/webhook', methods=['POST'])
+def telegram_webhook():
+    data = request.get_json(force=True)
+    update = Update.de_json(data, application.bot)
     try:
-        data = sheet.get_all_values()[1:]
-        now = datetime.now()
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    loop.create_task(application.process_update(update))
+    return "OK", 200
 
-        if periode == "mingguan":
-            start_date = now - timedelta(days=now.weekday())
-        elif periode == "bulanan":
-            start_date = now.replace(day=1)
-        else:
-            await update.message.reply_text("❌ Periode tidak valid.")
-            return
-
-        filtered = [row for row in data if datetime.strptime(row[0], "%Y-%m-%d") >= start_date]
-        total = sum(int(row[1].replace(",", "").strip()) for row in filtered)
-
-        kategori_rekap = {}
-        for row in filtered:
-            angka = int(row[1].replace(",", "").strip())
-            kategori_rekap[row[3]] = kategori_rekap.get(row[3], 0) + angka
-
-        msg = f"📊 Rekap {periode.capitalize()} (mulai {start_date.strftime('%Y-%m-%d')}):\n"
-        for kategori, jumlah in kategori_rekap.items():
-            msg += f"- {kategori.title()}: Rp{jumlah:,}\n"
-        msg += f"\nTotal: Rp{total:,}"
-        await update.message.reply_text(msg)
-    except Exception as e:
-        logging.error(f"Error rekap {periode}: {e}")
-        await update.message.reply_text("❌ Gagal membuat rekap.")
-
-async def rekap_mingguan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await rekap_periode(update, context, "mingguan")
-
-async def rekap_bulanan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await rekap_periode(update, context, "bulanan")
-
-# --- Webhook Handler ---
-@app_flask.route("/webhook", methods=["POST"])
-def webhook():
-    try:
-        request_data = request.get_json(force=True)
-        update = Update.de_json(request_data, bot.application.bot)
-
-        # Gunakan loop yang aktif tanpa ditutup
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-        loop.create_task(bot.application.process_update(update))
-        return "OK"
-    except Exception as e:
-        logging.error("❌ Webhook error:", exc_info=e)
-        return "Webhook Error", 500
-
-# --- Bot Init ---
-bot = Application.builder().token(BOT_TOKEN).build()
-bot.add_handler(CommandHandler("start", start))
-bot.add_handler(CommandHandler("kategori", show_kategori))
-bot.add_handler(CommandHandler("rekapminggu", rekap_mingguan))
-bot.add_handler(CommandHandler("rekapbulan", rekap_bulanan))
-bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-# --- Set Webhook dan Jalankan Flask ---
-async def main():
-    await bot.bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
-    logging.info("✅ Webhook set to: %s/webhook", WEBHOOK_URL)
+# --- Set webhook on startup ---
+async def on_start():
+    await application.bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
+    logging.info("✅ Webhook set to %s/webhook", WEBHOOK_URL)
 
 if __name__ == "__main__":
-    asyncio.run(main())
-    port = int(os.environ.get("PORT", 10000))
-    app_flask.run(host="0.0.0.0", port=port)
+    asyncio.run(on_start())
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
