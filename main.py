@@ -75,11 +75,11 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
 
         rows = sheet.get_all_values()[1:]
         data = [r for r in rows if datetime.strptime(r[0], "%Y-%m-%d") >= start]
-        total = sum(int(r[1]) for r in data)
+        total = sum(int(r[1].replace(",", "")) for r in data)
 
         per_kategori = {}
         for r in data:
-            per_kategori[r[3]] = per_kategori.get(r[3], 0) + int(r[1])
+            per_kategori[r[3]] = per_kategori.get(r[3], 0) + int(r[1].replace(",", ""))
 
         msg = f"📊 Rekap {tipe.capitalize()}:\n"
         for k, v in per_kategori.items():
