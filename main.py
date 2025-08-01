@@ -1,19 +1,35 @@
-import logging
 import os
 import json
 import base64
+import logging
+import threading
 from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
 import gspread
-from google.oauth2.service_account import Credentials
+from flask import Flask
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder, CommandHandler,
     MessageHandler, ContextTypes, filters
 )
+from google.oauth2.service_account import Credentials
 
-# --- Load ENV ---
+# === Flask for dummy endpoint ===
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+def home():
+    return "Bot Keuangan Aktif 🚀"
+
+@flask_app.route('/ping')
+def ping():
+    return "pong"
+
+def run_flask():
+    flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
+# === Load environment variables ===
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SPREADSHEET_NAME = os.getenv("SPREADSHEET_NAME")
@@ -21,10 +37,10 @@ KATEGORI_SHEET = os.getenv("KATEGORI_SHEET", "Kategori")
 DATA_SHEET = os.getenv("DATA_SHEET", "Sheet1")
 encoded_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64")
 
-# --- Setup Logging ---
+# === Setup Logging ===
 logging.basicConfig(level=logging.INFO)
 
-# --- Setup Google Credentials ---
+# === Google Sheets setup ===
 try:
     decoded_json = base64.b64decode(encoded_json).decode("utf-8")
     service_account_info = json.loads(decoded_json)
@@ -37,15 +53,13 @@ try:
 
     sheet = gc.open(SPREADSHEET_NAME).worksheet(DATA_SHEET)
     kategori_sheet = gc.open(SPREADSHEET_NAME).worksheet(KATEGORI_SHEET)
-
-    kategori_values = kategori_sheet.col_values(1)[1:]  # kolom A, skip header
+    kategori_values = kategori_sheet.col_values(1)[1:]  # Kolom A (skip header)
     kategori_list = [k.strip().lower() for k in kategori_values if k.strip()]
-
 except Exception as e:
     logging.error("❌ Gagal inisialisasi Google Sheets:", exc_info=e)
     raise SystemExit("❌ Gagal memuat Google credentials.")
 
-# --- Commands ---
+# === Telegram Commands ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Halo! Kirim catatan keuangan kamu dengan format:\n\n"
@@ -91,27 +105,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"Error handle_message: {e}")
         await update.message.reply_text("❌ Terjadi kesalahan. Coba lagi ya!")
 
-# --- Rekap ---
+# === Rekap Command ===
 async def rekap_periode(update: Update, context: ContextTypes.DEFAULT_TYPE, periode: str):
     try:
-        data = sheet.get_all_values()[1:]  # skip header
+        data = sheet.get_all_values()[1:]  # Skip header
         now = datetime.now()
 
-        if periode == "mingguan":
-            start_date = now - timedelta(days=now.weekday())
-        elif periode == "bulanan":
-            start_date = now.replace(day=1)
-        else:
-            await update.message.reply_text("❌ Periode tidak valid.")
-            return
-
+        start_date = now.replace(day=1) if periode == "bulanan" else now - timedelta(days=now.weekday())
         filtered = [row for row in data if datetime.strptime(row[0], "%Y-%m-%d") >= start_date]
-        total = sum(int(row[1].replace(",", "").strip()) for row in filtered)
 
+        total = 0
         kategori_rekap = {}
         for row in filtered:
             angka = int(row[1].replace(",", "").strip())
-            kategori_rekap[row[3]] = kategori_rekap.get(row[3], 0) + angka
+            kategori = row[3]
+            total += angka
+            kategori_rekap[kategori] = kategori_rekap.get(kategori, 0) + angka
 
         msg = f"📊 Rekap {periode.capitalize()} (mulai {start_date.strftime('%Y-%m-%d')}):\n"
         for kategori, jumlah in kategori_rekap.items():
@@ -129,8 +138,12 @@ async def rekap_mingguan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def rekap_bulanan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await rekap_periode(update, context, "bulanan")
 
-# --- Bot Start ---
+# === Main ===
 if __name__ == '__main__':
+    # Start Flask on separate thread
+    threading.Thread(target=run_flask).start()
+
+    # Start Telegram Bot
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("kategori", show_kategori))
@@ -138,5 +151,5 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("rekapbulan", rekap_bulanan))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("🤖 Bot berjalan...")
+    logging.info("🤖 Bot berjalan...")
     app.run_polling()
