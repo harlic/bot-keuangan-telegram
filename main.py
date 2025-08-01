@@ -3,7 +3,6 @@ import json
 import base64
 import logging
 import asyncio
-import threading
 from datetime import datetime, timedelta
 
 from flask import Flask, request
@@ -122,7 +121,7 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
 
-# === Application & Handlers ===
+# === Telegram App & Handlers ===
 application = Application.builder().token(BOT_TOKEN).build()
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("kategori", kategori_cb))
@@ -136,30 +135,19 @@ def webhook():
     try:
         json_data = request.get_json(force=True)
         update = Update.de_json(json_data, application.bot)
-
-        def run_in_thread():
-            try:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(application.initialize())
-                loop.run_until_complete(application.process_update(update))
-                loop.run_until_complete(application.shutdown())
-                loop.close()
-            except Exception as e:
-                logging.error("❌ Webhook inner error:", exc_info=e)
-
-        threading.Thread(target=run_in_thread).start()
+        asyncio.create_task(application.process_update(update))
     except Exception as e:
         logging.error("❌ Webhook error:", exc_info=e)
         return "Internal Server Error", 500
 
     return "ok", 200
 
-# === Set webhook on start ===
-async def set_webhook():
+# === Set webhook on startup ===
+async def on_startup():
+    await application.initialize()
     await application.bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
     logging.info("✅ Webhook diset ke %s/webhook", WEBHOOK_URL)
 
 if __name__ == "__main__":
-    asyncio.run(set_webhook())
+    asyncio.run(on_startup())
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
