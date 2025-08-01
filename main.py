@@ -1,14 +1,21 @@
-import os, json, base64, logging
+import os
+import json
+import base64
+import logging
 from datetime import datetime, timedelta
+
 from flask import Flask, request
 from dotenv import load_dotenv
 import gspread
 from google.oauth2.service_account import Credentials
+
 from telegram import Update
 from telegram.ext import (
     Application, CommandHandler,
     MessageHandler, ContextTypes, filters
 )
+
+import asyncio
 
 # --- Load ENV ---
 load_dotenv()
@@ -17,23 +24,23 @@ SPREADSHEET_NAME = os.getenv("SPREADSHEET_NAME")
 KATEGORI_SHEET = os.getenv("KATEGORI_SHEET", "Kategori")
 DATA_SHEET = os.getenv("DATA_SHEET", "Sheet1")
 encoded_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-
-# --- Logging ---
-logging.basicConfig(level=logging.INFO)
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # e.g. https://namaproject.onrender.com
 
 # --- Flask Setup ---
 flask_app = Flask(__name__)
 
-@flask_app.route('/')
+@flask_app.route("/")
 def home():
     return "Bot Keuangan Aktif 🚀"
 
-@flask_app.route('/ping')
+@flask_app.route("/ping")
 def ping():
     return "pong"
 
-# --- Google Sheet Setup ---
+# --- Logging ---
+logging.basicConfig(level=logging.INFO)
+
+# --- Google Sheets Setup ---
 try:
     decoded_json = base64.b64decode(encoded_json).decode("utf-8")
     service_account_info = json.loads(decoded_json)
@@ -46,13 +53,13 @@ try:
 
     sheet = gc.open(SPREADSHEET_NAME).worksheet(DATA_SHEET)
     kategori_sheet = gc.open(SPREADSHEET_NAME).worksheet(KATEGORI_SHEET)
-    kategori_values = kategori_sheet.col_values(1)[1:]
+    kategori_values = kategori_sheet.col_values(1)[1:]  # kolom A
     kategori_list = [k.strip().lower() for k in kategori_values if k.strip()]
 except Exception as e:
-    logging.error("❌ Gagal inisialisasi Google Sheets:", exc_info=e)
+    logging.error("Gagal inisialisasi Google Sheets:", exc_info=e)
     raise SystemExit("❌ Gagal memuat Google credentials.")
 
-# --- Bot Logic ---
+# --- Command Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Halo! Kirim catatan keuangan kamu dengan format:\n\n"
@@ -66,15 +73,13 @@ async def show_kategori(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg += "\n".join(f"- {k.title()}" for k in kategori_list)
         await update.message.reply_text(msg, parse_mode="Markdown")
     except Exception as e:
-        logging.error("Error show kategori:", exc_info=e)
+        logging.error(f"Error show kategori: {e}")
         await update.message.reply_text("❌ Gagal mengambil daftar kategori.")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         parts = update.message.text.strip().split()
-        amount_raw = parts[0].replace(",", "").replace(".", "")
-        amount = int(''.join(filter(str.isdigit, amount_raw)))
-
+        amount = int(parts[0])
         hashtag_index = next(i for i, p in enumerate(parts) if p.startswith("#"))
         description = " ".join(parts[1:hashtag_index])
         category_raw = " ".join(parts[hashtag_index:])[1:].strip().lower()
@@ -89,13 +94,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tanggal = datetime.now().strftime("%Y-%m-%d")
         sheet.append_row([tanggal, amount, description, category_raw])
         await update.message.reply_text("✅ Tersimpan!")
-
     except ValueError:
         await update.message.reply_text("❌ Jumlah harus berupa angka di awal.")
     except StopIteration:
         await update.message.reply_text("❌ Format salah! Gunakan tanda `#kategori` di akhir.", parse_mode="Markdown")
     except Exception as e:
-        logging.error("Error handle_message:", exc_info=e)
+        logging.error(f"Error handle_message: {e}")
         await update.message.reply_text("❌ Terjadi kesalahan. Coba lagi ya!")
 
 async def rekap_periode(update: Update, context: ContextTypes.DEFAULT_TYPE, periode: str):
@@ -112,11 +116,11 @@ async def rekap_periode(update: Update, context: ContextTypes.DEFAULT_TYPE, peri
             return
 
         filtered = [row for row in data if datetime.strptime(row[0], "%Y-%m-%d") >= start_date]
-        total = sum(int(row[1].replace(",", "").replace(".", "").strip()) for row in filtered)
+        total = sum(int(row[1].replace(",", "").strip()) for row in filtered)
 
         kategori_rekap = {}
         for row in filtered:
-            angka = int(row[1].replace(",", "").replace(".", "").strip())
+            angka = int(row[1].replace(",", "").strip())
             kategori_rekap[row[3]] = kategori_rekap.get(row[3], 0) + angka
 
         msg = f"📊 Rekap {periode.capitalize()} (mulai {start_date.strftime('%Y-%m-%d')}):\n"
@@ -125,7 +129,7 @@ async def rekap_periode(update: Update, context: ContextTypes.DEFAULT_TYPE, peri
         msg += f"\nTotal: Rp{total:,}"
         await update.message.reply_text(msg)
     except Exception as e:
-        logging.error(f"Error rekap {periode}:", exc_info=e)
+        logging.error(f"Error rekap {periode}: {e}")
         await update.message.reply_text("❌ Gagal membuat rekap.")
 
 async def rekap_mingguan(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -134,7 +138,7 @@ async def rekap_mingguan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def rekap_bulanan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await rekap_periode(update, context, "bulanan")
 
-# --- Inisialisasi Bot ---
+# --- Init Telegram App ---
 application = Application.builder().token(BOT_TOKEN).build()
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("kategori", show_kategori))
@@ -142,26 +146,28 @@ application.add_handler(CommandHandler("rekapminggu", rekap_mingguan))
 application.add_handler(CommandHandler("rekapbulan", rekap_bulanan))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-# --- Webhook Route ---
-async def telegram_webhook(request_data):
-    try:
-        update = Update.de_json(request_data, application.bot)
-        await application.process_update(update)
-    except Exception as e:
-        logging.error("Webhook payload error:", exc_info=e)
-
-@flask_app.route('/webhook', methods=["POST"])
+# --- Webhook Endpoint ---
+@flask_app.route("/webhook", methods=["POST"])
 def webhook():
-    request_data = request.get_json(force=True)
-    application.create_task(telegram_webhook(request_data))
+    try:
+        request_data = request.get_json(force=True)
+        update = Update.de_json(request_data, application.bot)
+
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task(application.process_update(update))
+        else:
+            loop.run_until_complete(application.process_update(update))
+    except Exception as e:
+        logging.error("❌ Webhook error:", exc_info=e)
+        return "Internal Server Error", 500
     return "OK"
 
-# --- Set Webhook & Run ---
+# --- Set Webhook at Startup ---
 async def set_webhook():
     await application.bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
 
-if __name__ == '__main__':
-    import asyncio
+if __name__ == "__main__":
     asyncio.run(set_webhook())
     port = int(os.environ.get("PORT", 10000))
     flask_app.run(host="0.0.0.0", port=port)
