@@ -135,11 +135,10 @@ def webhook():
     try:
         json_data = request.get_json(force=True)
         update = Update.de_json(json_data, application.bot)
-        asyncio.create_task(application.process_update(update))
+        asyncio.run(application.process_update(update))
     except Exception as e:
         logging.error("❌ Webhook error:", exc_info=e)
         return "Internal Server Error", 500
-
     return "ok", 200
 
 # === Set webhook on startup ===
