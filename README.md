@@ -36,12 +36,9 @@ Semua transaksi dicatat secara real-time ke Google Spreadsheet milik kamu. Data 
 ## 📦 Teknologi yang Digunakan
 
 - Python 3.11
-- [python-telegram-bot](https://github.com/python-telegram-bot/python-telegram-bot)
-- [gspread](https://github.com/burnash/gspread)
-- Google Service Account JSON
-- Google Sheets API
-- Replit (opsional untuk development)
-
+- [python-telegram-bot v20.6](https://docs.python-telegram-bot.org/)
+- Flask + Webhook (deploy via [Render.com](https://render.com))
+- Google Sheets API (via `gspread`)
 
 ---
 
@@ -64,6 +61,27 @@ Sheet:
 
 ---
 
+## 🌐 Deploy Sendiri?
+
+### 1. Clone dan buat file `.env`
+
+BOT_TOKEN=token_telegram_anda
+SPREADSHEET_NAME=NamaSpreadsheet
+DATA_SHEET=Sheet1
+KATEGORI_SHEET=Kategori
+GOOGLE_SERVICE_ACCOUNT_JSON_BASE64=...
+WEBHOOK_URL=https://your-domain.onrender.com
+
+### 2. Deploy ke Render
+-Tambahkan Python build environment
+-Jalankan main.py
+-Pastikan requirements.txt sudah sesuai
+
+### 3. Tambahkan endpoint ping
+Bot ini menyediakan endpoint ping /ping dan / untuk keperluan UptimeRobot.
+
+---
+
 ## 🔒 Keamanan
 
 ⚠️ Jangan pernah upload `.env` atau `service_account.json` ke GitHub publik. Gunakan `.env.example` sebagai template untuk berbagi format variabel lingkungan.
@@ -73,7 +91,7 @@ Sheet:
 # 📌 Status
 
 🔖 Versi: **1.0 (stable)**  
-📅 Rilis: Juli 2025  
+📅 Rilis: Agustus 2025  
 👤 Author: [@harlic](https://github.com/harlic)
 
 ---
@@ -91,6 +109,6 @@ Sheet:
 
 ---
 
-## 💬 Lisensi
+## License
 
-Silakan gunakan, modifikasi, dan sebarkan sesuai kebutuhan.
+This project is licensed under the [MIT License](./LICENSE) – feel free to use, modify, and share with attribution.
