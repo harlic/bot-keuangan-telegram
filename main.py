@@ -2,10 +2,8 @@ import os
 import json
 import base64
 import logging
-import asyncio
 from datetime import datetime, timedelta
 
-from flask import Flask, request
 from dotenv import load_dotenv
 import gspread
 from google.oauth2.service_account import Credentials
@@ -22,18 +20,6 @@ SPREADSHEET_NAME = os.getenv("SPREADSHEET_NAME")
 KATEGORI_SHEET = os.getenv("KATEGORI_SHEET", "Kategori")
 DATA_SHEET = os.getenv("DATA_SHEET", "Sheet1")
 encoded_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-
-# === Flask App ===
-app = Flask(__name__)
-
-@app.route("/")
-def home():
-    return "Bot Keuangan Aktif 🚀"
-
-@app.route("/ping")
-def ping():
-    return "pong"
 
 # === Logging ===
 logging.basicConfig(level=logging.INFO)
@@ -129,24 +115,7 @@ application.add_handler(CommandHandler("rekapminggu", rekap_mingguan))
 application.add_handler(CommandHandler("rekapbulan", rekap_bulanan))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
 
-# === Webhook endpoint ===
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    try:
-        json_data = request.get_json(force=True)
-        update = Update.de_json(json_data, application.bot)
-        asyncio.run(application.process_update(update))
-    except Exception as e:
-        logging.error("❌ Webhook error:", exc_info=e)
-        return "Internal Server Error", 500
-    return "ok", 200
-
-# === Set webhook on startup ===
-async def on_startup():
-    await application.initialize()
-    await application.bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
-    logging.info("✅ Webhook diset ke %s/webhook", WEBHOOK_URL)
-
+# === Jalankan Polling ===
 if __name__ == "__main__":
-    asyncio.run(on_startup())
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    logging.info("🤖 Bot keuangan berjalan dengan polling...")
+    application.run_polling()
