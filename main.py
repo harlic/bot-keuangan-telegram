@@ -56,9 +56,7 @@ except Exception as e:
 
 # === Handler Functions ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Halo! Kirim catatan keuangan kamu:\n<jumlah> <deskripsi> #kategori"
-    )
+    await update.message.reply_text("Halo! Kirim catatan keuangan kamu dengan format:\n\n<jumlah> <deskripsi> #kategori\n\nContoh:\n15000 beli kopi #jajan")
 
 async def kategori_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     daftar = "\n".join(f"- {k.title()}" for k in kategori_list)
@@ -69,33 +67,29 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
         now = datetime.now()
         if tipe == "mingguan":
             start = now - timedelta(days=now.weekday())
-        else:  # bulanan
-            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        elif tipe == "bulanan":
+            start = now.replace(day=1)
+        else:
+            await update.message.reply_text("❌ Tipe rekap tidak dikenal.")
+            return
 
-        rows = sheet.get_all_values()[1:]  # Skip header
-        data = []
-        for row in rows:
-            try:
-                tgl = datetime.strptime(row[0], "%Y-%m-%d")
-                if tgl >= start:
-                    data.append(row)
-            except Exception:
-                continue  # Skip baris dengan tanggal invalid
-
+        rows = sheet.get_all_values()[1:]
+        data = [r for r in rows if datetime.strptime(r[0], "%Y-%m-%d") >= start]
         total = sum(int(r[1].replace(",", "")) for r in data)
+
         per_kategori = {}
         for r in data:
-            jumlah = int(r[1].replace(",", ""))
-            per_kategori[r[3]] = per_kategori.get(r[3], 0) + jumlah
+            per_kategori[r[3]] = per_kategori.get(r[3], 0) + int(r[1].replace(",", ""))
 
-        msg = f"📊 Rekap {tipe.capitalize()}:\n"
+        start_str = start.strftime("%Y-%m-%d")
+        msg = f"📊 Rekap {tipe.capitalize()} (mulai {start_str}):\n"
         for k, v in per_kategori.items():
             msg += f"- {k.title()}: Rp{v:,}\n"
         msg += f"\nTotal: Rp{total:,}"
-        await update.message.reply_text(msg)
 
+        await update.message.reply_text(msg)
     except Exception as e:
-        logging.error("❌ Error rekap:", exc_info=e)
+        logging.error("Error rekap:", exc_info=e)
         await update.message.reply_text("❌ Gagal ambil data rekap.")
 
 async def rekap_mingguan(update: Update, context: ContextTypes.DEFAULT_TYPE):
