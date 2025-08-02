@@ -62,6 +62,9 @@ async def kategori_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     daftar = "\n".join(f"- {k.title()}" for k in kategori_list)
     await update.message.reply_text("*Kategori:*\n" + daftar, parse_mode="Markdown")
 
+def parse_amount(s: str) -> int:
+    return int(s.replace(",", "").replace(".", "").strip())
+
 async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
     try:
         now = datetime.now()
@@ -82,14 +85,14 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
                 if tanggal >= start:
                     data.append(r)
             except Exception:
-                continue  # skip baris dengan format tanggal salah
+                continue
 
-        total = sum(int(r[1].replace(",", "").strip()) for r in data)
+        total = sum(parse_amount(r[1]) for r in data)
 
         per_kategori = {}
         for r in data:
             key = r[3].strip().lower()
-            per_kategori[key] = per_kategori.get(key, 0) + int(r[1].replace(",", "").strip())
+            per_kategori[key] = per_kategori.get(key, 0) + parse_amount(r[1])
 
         start_str = start.strftime("%Y-%m-%d")
         msg = f"📊 Rekap {tipe.capitalize()} (mulai {start_str}):\n"
