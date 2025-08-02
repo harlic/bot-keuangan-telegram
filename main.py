@@ -63,36 +63,42 @@ async def kategori_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     daftar = "\n".join(f"- {k.title()}" for k in kategori_list)
     await update.message.reply_text("*Kategori:*\n" + daftar, parse_mode="Markdown")
 
-async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
+async def rekap_periode(update: Update, context: ContextTypes.DEFAULT_TYPE, periode: str):
     try:
+        data = sheet.get_all_values()[1:]  # skip header
         now = datetime.now()
-        if tipe == "mingguan":
-            start = now - timedelta(days=now.weekday())
+
+        if periode == "mingguan":
+            start_date = now - timedelta(days=now.weekday())
+        elif periode == "bulanan":
+            start_date = now.replace(day=1)
         else:
-            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            await update.message.reply_text("❌ Periode tidak valid.")
+            return
 
-        rows = sheet.get_all_values()[1:]
-        data = [r for r in rows if datetime.strptime(r[0], "%Y-%m-%d") >= start]
-        total = sum(int(r[1].replace(",", "")) for r in data)
+        filtered = [row for row in data if datetime.strptime(row[0], "%Y-%m-%d") >= start_date]
+        total = sum(int(row[1].replace(",", "").strip()) for row in filtered)
 
-        per_kategori = {}
-        for r in data:
-            per_kategori[r[3]] = per_kategori.get(r[3], 0) + int(r[1].replace(",", ""))
+        kategori_rekap = {}
+        for row in filtered:
+            angka = int(row[1].replace(",", "").strip())
+            kategori_rekap[row[3]] = kategori_rekap.get(row[3], 0) + angka
 
-        msg = f"📊 Rekap {tipe.capitalize()}:\n"
-        for k, v in per_kategori.items():
-            msg += f"- {k.title()}: Rp{v:,}\n"
+        msg = f"📊 Rekap {periode.capitalize()} (mulai {start_date.strftime('%Y-%m-%d')}):\n"
+        for kategori, jumlah in kategori_rekap.items():
+            msg += f"- {kategori.title()}: Rp{jumlah:,}\n"
         msg += f"\nTotal: Rp{total:,}"
+
         await update.message.reply_text(msg)
     except Exception as e:
-        logging.error("Error rekap:", exc_info=e)
-        await update.message.reply_text("❌ Gagal ambil data rekap.")
+        logging.error(f"Error rekap {periode}: {e}")
+        await update.message.reply_text("❌ Gagal membuat rekap.")
 
 async def rekap_mingguan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await rekap(update, context, "mingguan")
+    await rekap_periode(update, context, "mingguan")
 
 async def rekap_bulanan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await rekap(update, context, "bulanan")
+    await rekap_periode(update, context, "bulanan")
 
 async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
