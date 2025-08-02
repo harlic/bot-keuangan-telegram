@@ -22,6 +22,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 SPREADSHEET_NAME = os.getenv("SPREADSHEET_NAME")
 KATEGORI_SHEET = os.getenv("KATEGORI_SHEET", "Kategori")
 DATA_SHEET = os.getenv("DATA_SHEET", "Sheet1")
+BUDGET_SHEET = os.getenv("BUDGET_SHEET", "Budget")
 encoded_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64")
 
 # === Logging ===
@@ -47,9 +48,25 @@ try:
     ]
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
     gc = gspread.authorize(creds)
+
     sheet = gc.open(SPREADSHEET_NAME).worksheet(DATA_SHEET)
     kategori_sheet = gc.open(SPREADSHEET_NAME).worksheet(KATEGORI_SHEET)
     kategori_list = [k.strip().lower() for k in kategori_sheet.col_values(1)[1:] if k.strip()]
+
+    # Load budget sheet
+    budget_sheet = gc.open(SPREADSHEET_NAME).worksheet(BUDGET_SHEET)
+    budget_rows = budget_sheet.get_all_values()[1:]
+    budget_data = {}
+    for row in budget_rows:
+        if len(row) < 3:
+            continue
+        bulan = row[0].strip()
+        kategori = row[1].strip().lower()
+        nominal = row[2].replace(",", "").replace(".", "").strip()
+        try:
+            budget_data[(bulan, kategori)] = int(nominal)
+        except ValueError:
+            logging.warning(f"Budget invalid di baris: {row}")
 except Exception as e:
     logging.error("❌ Gagal inisialisasi Google Sheets:", exc_info=e)
     raise SystemExit("❌ Tidak bisa lanjut tanpa Google Credentials!")
@@ -72,6 +89,7 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
             start = now - timedelta(days=now.weekday())
         elif tipe == "bulanan":
             start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            bulan_str = now.strftime("%Y-%m")
         else:
             await update.message.reply_text("❌ Tipe rekap tidak dikenal.")
             return
@@ -87,7 +105,6 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
                 continue
 
         total = sum(parse_amount(r[1]) for r in data)
-
         per_kategori = {}
         for r in data:
             key = r[3].strip().lower()
@@ -96,13 +113,28 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
         start_str = start.strftime("%Y-%m-%d")
         msg = f"📊 Rekap {tipe.capitalize()} (mulai {start_str}):\n"
         for k, v in per_kategori.items():
-            msg += f"- {k.title()}: Rp{v:,}\n"
-        msg += f"\nTotal: Rp{total:,}"
+            if tipe == "bulanan":
+                budget = budget_data.get((bulan_str, k))
+                if budget:
+                    msg += f"- {k.title()}: Rp{v:,} / Rp{budget:,}\n"
+                else:
+                    msg += f"- {k.title()}: Rp{v:,} (no budget)\n"
+            else:
+                msg += f"- {k.title()}: Rp{v:,}\n"
 
+        if tipe == "bulanan":
+            msg += "\nSisa Anggaran:\n"
+            for k, v in per_kategori.items():
+                budget = budget_data.get((bulan_str, k))
+                if budget:
+                    sisa = budget - v
+                    msg += f"- {k.title()}: Rp{sisa:,}\n"
+
+        msg += f"\nTotal Pengeluaran: Rp{total:,}"
         await update.message.reply_text(msg)
 
     except Exception as e:
-        logging.error("Error rekap:", exc_info=e)
+        logging.error("❌ Error rekap:", exc_info=e)
         await update.message.reply_text("❌ Gagal ambil data rekap.")
 
 async def rekap_mingguan(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -115,7 +147,7 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         text = update.message.text.strip()
         parts = text.split()
-        amount = int(parts[0])
+        amount = parse_amount(parts[0])
         hashtag_index = next(i for i, part in enumerate(parts) if part.startswith("#"))
         description = " ".join(parts[1:hashtag_index])
         kategori = " ".join(parts[hashtag_index:])[1:].strip().lower()
