@@ -3,10 +3,12 @@ import json
 import base64
 import logging
 from datetime import datetime, timedelta
+from flask import Flask
 
 from dotenv import load_dotenv
 import gspread
 from google.oauth2.service_account import Credentials
+
 from telegram import Update
 from telegram.ext import (
     Application, CommandHandler,
@@ -23,6 +25,17 @@ encoded_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64")
 
 # === Logging ===
 logging.basicConfig(level=logging.INFO)
+
+# === Flask App for UptimeRobot ===
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Bot Keuangan Aktif 🚀"
+
+@app.route("/ping")
+def ping():
+    return "pong"
 
 # === Google Sheets Setup ===
 try:
@@ -115,7 +128,15 @@ application.add_handler(CommandHandler("rekapminggu", rekap_mingguan))
 application.add_handler(CommandHandler("rekapbulan", rekap_bulanan))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
 
-# === Jalankan Polling ===
+# === Jalankan bot dan Flask secara paralel ===
 if __name__ == "__main__":
-    logging.info("🤖 Bot keuangan berjalan dengan polling...")
-    application.run_polling()
+    import threading
+
+    def run_telegram():
+        application.run_polling()
+
+    def run_flask():
+        app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
+    threading.Thread(target=run_telegram).start()
+    run_flask()
