@@ -74,12 +74,22 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
             return
 
         rows = sheet.get_all_values()[1:]
-        data = [r for r in rows if datetime.strptime(r[0], "%Y-%m-%d") >= start]
-        total = sum(int(r[1].replace(",", "")) for r in data)
+
+        data = []
+        for r in rows:
+            try:
+                tanggal = datetime.strptime(r[0].strip(), "%Y-%m-%d")
+                if tanggal >= start:
+                    data.append(r)
+            except Exception:
+                continue  # skip baris dengan format tanggal salah
+
+        total = sum(int(r[1].replace(",", "").strip()) for r in data)
 
         per_kategori = {}
         for r in data:
-            per_kategori[r[3]] = per_kategori.get(r[3], 0) + int(r[1].replace(",", ""))
+            key = r[3].strip().lower()
+            per_kategori[key] = per_kategori.get(key, 0) + int(r[1].replace(",", "").strip())
 
         start_str = start.strftime("%Y-%m-%d")
         msg = f"📊 Rekap {tipe.capitalize()} (mulai {start_str}):\n"
@@ -88,6 +98,7 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
         msg += f"\nTotal: Rp{total:,}"
 
         await update.message.reply_text(msg)
+
     except Exception as e:
         logging.error("Error rekap:", exc_info=e)
         await update.message.reply_text("❌ Gagal ambil data rekap.")
