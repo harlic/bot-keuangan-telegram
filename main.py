@@ -71,13 +71,12 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
         if tipe == "mingguan":
             start = now - timedelta(days=now.weekday())
         elif tipe == "bulanan":
-            start = now.replace(day=1)
+            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         else:
             await update.message.reply_text("❌ Tipe rekap tidak dikenal.")
             return
 
         rows = sheet.get_all_values()[1:]
-
         data = []
         for r in rows:
             try:
