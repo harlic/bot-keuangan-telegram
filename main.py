@@ -4,12 +4,10 @@ import base64
 import logging
 import threading
 from datetime import datetime, timedelta
-
 from flask import Flask
 from dotenv import load_dotenv
 import gspread
 from google.oauth2.service_account import Credentials
-
 from telegram import Update
 from telegram.ext import (
     Application, CommandHandler,
@@ -86,7 +84,7 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
     try:
         now = datetime.now()
         if tipe == "mingguan":
-            start = now - timedelta(days=now.weekday())
+            start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
         elif tipe == "bulanan":
             start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
             bulan_str = now.strftime("%Y-%m")
