@@ -50,8 +50,17 @@ try:
     sheet = gc.open(SPREADSHEET_NAME).worksheet(DATA_SHEET)
     kategori_sheet = gc.open(SPREADSHEET_NAME).worksheet(KATEGORI_SHEET)
     kategori_list = [k.strip().lower() for k in kategori_sheet.col_values(1)[1:] if k.strip()]
+except Exception as e:
+    logging.error("❌ Gagal inisialisasi Google Sheets:", exc_info=e)
+    raise SystemExit("❌ Tidak bisa lanjut tanpa Google Credentials!")
 
-    # Load budget sheet
+# === Helpers ===
+def parse_amount(s: str) -> int:
+    """Parse string angka (dengan titik/koma) jadi int"""
+    return int(s.replace(",", "").replace(".", "").strip())
+
+def load_budget_data():
+    """Selalu baca ulang budget sheet"""
     budget_sheet = gc.open(SPREADSHEET_NAME).worksheet(BUDGET_SHEET)
     budget_rows = budget_sheet.get_all_values()[1:]
     budget_data = {}
@@ -65,20 +74,19 @@ try:
             budget_data[(bulan, kategori)] = int(nominal)
         except ValueError:
             logging.warning(f"Budget invalid di baris: {row}")
-except Exception as e:
-    logging.error("❌ Gagal inisialisasi Google Sheets:", exc_info=e)
-    raise SystemExit("❌ Tidak bisa lanjut tanpa Google Credentials!")
+    return budget_data
 
 # === Handler Functions ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Halo! Kirim catatan keuangan kamu dengan format:\n\n<jumlah> <deskripsi> #kategori\n\nContoh:\n15000 beli kopi #jajan")
+    await update.message.reply_text(
+        "Halo! Kirim catatan keuangan kamu dengan format:\n\n"
+        "<jumlah> <deskripsi> #kategori\n\n"
+        "Contoh:\n15000 beli kopi #jajan"
+    )
 
 async def kategori_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     daftar = "\n".join(f"- {k.title()}" for k in kategori_list)
     await update.message.reply_text("*Kategori:*\n" + daftar, parse_mode="Markdown")
-
-def parse_amount(s: str) -> int:
-    return int(s.replace(",", "").replace(".", "").strip())
 
 async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
     try:
@@ -88,6 +96,7 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
         elif tipe == "bulanan":
             start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
             bulan_str = now.strftime("%Y-%m")
+            budget_data = load_budget_data()
         else:
             await update.message.reply_text("❌ Tipe rekap tidak dikenal.")
             return
@@ -110,10 +119,11 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
 
         start_str = start.strftime("%Y-%m-%d")
         msg = f"📊 Rekap {tipe.capitalize()} (mulai {start_str}):\n"
+
         for k, v in per_kategori.items():
             if tipe == "bulanan":
                 budget = budget_data.get((bulan_str, k))
-                if budget:
+                if budget is not None:
                     msg += f"- {k.title()}: Rp{v:,} / Rp{budget:,}\n"
                 else:
                     msg += f"- {k.title()}: Rp{v:,} (no budget)\n"
@@ -124,7 +134,7 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
             msg += "\nSisa Anggaran:\n"
             for k, v in per_kategori.items():
                 budget = budget_data.get((bulan_str, k))
-                if budget:
+                if budget is not None:
                     sisa = budget - v
                     msg += f"- {k.title()}: Rp{sisa:,}\n"
 
