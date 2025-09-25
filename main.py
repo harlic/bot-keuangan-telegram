@@ -4,6 +4,7 @@ import base64
 import logging
 import threading
 from datetime import datetime, timedelta
+
 from flask import Flask
 from dotenv import load_dotenv
 import gspread
@@ -14,19 +15,18 @@ from telegram.ext import (
     MessageHandler, ContextTypes, filters
 )
 
-# === Load ENV ===
+# ================== Load ENV & Logging ==================
 load_dotenv()
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-SPREADSHEET_NAME = os.getenv("SPREADSHEET_NAME")
-KATEGORI_SHEET = os.getenv("KATEGORI_SHEET", "Kategori")
-DATA_SHEET = os.getenv("DATA_SHEET", "Sheet1")
-BUDGET_SHEET = os.getenv("BUDGET_SHEET", "Budget")
-encoded_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64")
+BOT_TOKEN       = os.getenv("BOT_TOKEN")
+SPREADSHEET_NAME= os.getenv("SPREADSHEET_NAME")
+KATEGORI_SHEET  = os.getenv("KATEGORI_SHEET", "Kategori")
+DATA_SHEET      = os.getenv("DATA_SHEET", "Sheet1")
+BUDGET_SHEET    = os.getenv("BUDGET_SHEET", "Budget")
+encoded_json    = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64")
 
-# === Logging ===
 logging.basicConfig(level=logging.INFO)
 
-# === Flask App ===
+# ================== Flask (untuk UptimeRobot) ==================
 app = Flask(__name__)
 
 @app.route("/")
@@ -37,7 +37,7 @@ def home():
 def ping():
     return "pong"
 
-# === Google Sheets Setup ===
+# ================== Google Sheets Setup ==================
 try:
     creds_dict = json.loads(base64.b64decode(encoded_json).decode("utf-8"))
     scopes = [
@@ -45,38 +45,41 @@ try:
         "https://www.googleapis.com/auth/drive"
     ]
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-    gc = gspread.authorize(creds)
+    gc    = gspread.authorize(creds)
 
-    sheet = gc.open(SPREADSHEET_NAME).worksheet(DATA_SHEET)
-    kategori_sheet = gc.open(SPREADSHEET_NAME).worksheet(KATEGORI_SHEET)
-    kategori_list = [k.strip().lower() for k in kategori_sheet.col_values(1)[1:] if k.strip()]
+    sheet_data = gc.open(SPREADSHEET_NAME).worksheet(DATA_SHEET)
 except Exception as e:
     logging.error("❌ Gagal inisialisasi Google Sheets:", exc_info=e)
     raise SystemExit("❌ Tidak bisa lanjut tanpa Google Credentials!")
 
-# === Helpers ===
+# ================== Helper Functions ==================
 def parse_amount(s: str) -> int:
-    """Parse string angka (dengan titik/koma) jadi int"""
+    """Ubah string angka (dengan koma/titik) menjadi int."""
     return int(s.replace(",", "").replace(".", "").strip())
 
-def load_budget_data():
-    """Selalu baca ulang budget sheet"""
+def load_kategori_list() -> list[str]:
+    """Selalu ambil daftar kategori terbaru dari sheet."""
+    ks = gc.open(SPREADSHEET_NAME).worksheet(KATEGORI_SHEET)
+    return [k.strip().lower() for k in ks.col_values(1)[1:] if k.strip()]
+
+def load_budget_data() -> dict:
+    """Selalu ambil data budget terbaru per (bulan,kategori)."""
     budget_sheet = gc.open(SPREADSHEET_NAME).worksheet(BUDGET_SHEET)
-    budget_rows = budget_sheet.get_all_values()[1:]
-    budget_data = {}
+    budget_rows  = budget_sheet.get_all_values()[1:]
+    data = {}
     for row in budget_rows:
         if len(row) < 3:
             continue
-        bulan = row[0].strip()
+        bulan    = row[0].strip()
         kategori = row[1].strip().lower()
-        nominal = row[2].replace(",", "").replace(".", "").strip()
         try:
-            budget_data[(bulan, kategori)] = int(nominal)
+            nominal = parse_amount(row[2])
+            data[(bulan, kategori)] = nominal
         except ValueError:
-            logging.warning(f"Budget invalid di baris: {row}")
-    return budget_data
+            logging.warning("Budget invalid di baris: %s", row)
+    return data
 
-# === Handler Functions ===
+# ================== Telegram Handlers ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Halo! Kirim catatan keuangan kamu dengan format:\n\n"
@@ -85,23 +88,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def kategori_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    daftar = "\n".join(f"- {k.title()}" for k in kategori_list)
+    daftar = "\n".join(f"- {k.title()}" for k in load_kategori_list())
     await update.message.reply_text("*Kategori:*\n" + daftar, parse_mode="Markdown")
 
 async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
     try:
         now = datetime.now()
         if tipe == "mingguan":
-            start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+            start = (now - timedelta(days=now.weekday())).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
         elif tipe == "bulanan":
             start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            bulan_str = now.strftime("%Y-%m")
+            bulan_str   = now.strftime("%Y-%m")
             budget_data = load_budget_data()
         else:
             await update.message.reply_text("❌ Tipe rekap tidak dikenal.")
             return
 
-        rows = sheet.get_all_values()[1:]
+        rows = sheet_data.get_all_values()[1:]
         data = []
         for r in rows:
             try:
@@ -112,15 +117,15 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
                 continue
 
         total = sum(parse_amount(r[1]) for r in data)
-        per_kategori = {}
+        per_kat = {}
         for r in data:
             key = r[3].strip().lower()
-            per_kategori[key] = per_kategori.get(key, 0) + parse_amount(r[1])
+            per_kat[key] = per_kat.get(key, 0) + parse_amount(r[1])
 
         start_str = start.strftime("%Y-%m-%d")
         msg = f"📊 Rekap {tipe.capitalize()} (mulai {start_str}):\n"
 
-        for k, v in per_kategori.items():
+        for k, v in per_kat.items():
             if tipe == "bulanan":
                 budget = budget_data.get((bulan_str, k))
                 if budget is not None:
@@ -132,7 +137,7 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
 
         if tipe == "bulanan":
             msg += "\nSisa Anggaran:\n"
-            for k, v in per_kategori.items():
+            for k, v in per_kat.items():
                 budget = budget_data.get((bulan_str, k))
                 if budget is not None:
                     sisa = budget - v
@@ -153,14 +158,14 @@ async def rekap_bulanan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        text = update.message.text.strip()
-        parts = text.split()
+        text   = update.message.text.strip()
+        parts  = text.split()
         amount = parse_amount(parts[0])
-        hashtag_index = next(i for i, part in enumerate(parts) if part.startswith("#"))
-        description = " ".join(parts[1:hashtag_index])
-        kategori = " ".join(parts[hashtag_index:])[1:].strip().lower()
+        hashtag_index = next(i for i, p in enumerate(parts) if p.startswith("#"))
+        description   = " ".join(parts[1:hashtag_index])
+        kategori      = " ".join(parts[hashtag_index:])[1:].strip().lower()
 
-        if kategori not in kategori_list:
+        if kategori not in load_kategori_list():
             await update.message.reply_text(
                 f"❌ Kategori *{kategori}* tidak ditemukan.",
                 parse_mode="Markdown"
@@ -168,7 +173,7 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         tanggal = datetime.now().strftime("%Y-%m-%d")
-        sheet.append_row([tanggal, amount, description, kategori])
+        sheet_data.append_row([tanggal, amount, description, kategori])
         await update.message.reply_text("✅ Catatan disimpan!")
 
     except Exception as e:
@@ -178,7 +183,7 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
 
-# === Telegram App & Handlers ===
+# ================== Telegram Application ==================
 application = Application.builder().token(BOT_TOKEN).build()
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("kategori", kategori_cb))
@@ -186,7 +191,7 @@ application.add_handler(CommandHandler("rekapminggu", rekap_mingguan))
 application.add_handler(CommandHandler("rekapbulan", rekap_bulanan))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_msg))
 
-# === Run polling and Flask together ===
+# ================== Run Polling + Flask ==================
 if __name__ == "__main__":
     def run_flask():
         port = int(os.environ.get("PORT", 10000))
