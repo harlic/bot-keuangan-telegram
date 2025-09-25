@@ -95,12 +95,16 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
     try:
         now = datetime.now()
         if tipe == "mingguan":
-            start = (now - timedelta(days=now.weekday())).replace(
-                hour=0, minute=0, second=0, microsecond=0
-            )
+            start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+            end   = now.replace(hour=23, minute=59, second=59, microsecond=999999)  # sampai hari ini
         elif tipe == "bulanan":
             start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            bulan_str   = now.strftime("%Y-%m")
+            # awal bulan berikutnya
+            if start.month == 12:
+                end = start.replace(year=start.year + 1, month=1)
+            else:
+                end = start.replace(month=start.month + 1)
+            bulan_str   = start.strftime("%Y-%m")
             budget_data = load_budget_data()
         else:
             await update.message.reply_text("❌ Tipe rekap tidak dikenal.")
@@ -111,7 +115,8 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
         for r in rows:
             try:
                 tanggal = datetime.strptime(r[0].strip(), "%Y-%m-%d")
-                if tanggal >= start:
+                # cek batas akhir
+                if tanggal >= start and tanggal < end:
                     data.append(r)
             except Exception:
                 continue
