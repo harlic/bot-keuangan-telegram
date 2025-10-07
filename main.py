@@ -15,6 +15,8 @@ from telegram.ext import (
     MessageHandler, ContextTypes, filters
 )
 
+import requests, time
+
 # ================== Load ENV & Logging ==================
 load_dotenv()
 BOT_TOKEN       = os.getenv("BOT_TOKEN")
@@ -78,6 +80,17 @@ def load_budget_data() -> dict:
         except ValueError:
             logging.warning("Budget invalid di baris: %s", row)
     return data
+
+def keep_alive():
+    url = "https://bot-keuangan-telegram.onrender.com/ping"
+    while True:
+        try:
+            requests.get(url, timeout=10)
+            logging.info("🔁 Self-ping sent to keep Render awake.")
+        except Exception as e:
+            logging.warning(f"Ping gagal: {e}")
+        time.sleep(240)  # setiap 4 menit
+
 
 # ================== Telegram Handlers ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -202,5 +215,8 @@ if __name__ == "__main__":
         port = int(os.environ.get("PORT", 10000))
         app.run(host="0.0.0.0", port=port)
 
-    threading.Thread(target=run_flask).start()
+    # Jalankan Flask dan self-ping di thread terpisah
+    threading.Thread(target=keep_alive, daemon=True).start()
+    threading.Thread(target=run_flask, daemon=True).start()
     application.run_polling()
+
