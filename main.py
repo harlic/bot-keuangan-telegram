@@ -16,6 +16,7 @@ from telegram.ext import (
 )
 
 import requests, time
+from telegram import ReplyKeyboardMarkup
 
 # ================== Load ENV & Logging ==================
 load_dotenv()
@@ -94,10 +95,18 @@ def keep_alive():
 
 # ================== Telegram Handlers ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        ["/rekapbulan", "/rekapminggu"],
+        ["/kategori"]
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    
     await update.message.reply_text(
-        "Halo! Kirim catatan keuangan kamu dengan format:\n\n"
-        "<jumlah> <deskripsi> #kategori\n\n"
-        "Contoh:\n15000 beli kopi #jajan"
+        "Halo! 👋\n"
+        "Gunakan tombol di bawah untuk mulai:\n"
+        "- Catat pengeluaran dengan format: `<jumlah> <deskripsi> #kategori`\n"
+        "- atau tekan tombol untuk melihat rekap dan kategori.",
+        reply_markup=reply_markup
     )
 
 async def kategori_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
