@@ -245,29 +245,18 @@ if __name__ == "__main__":
         port = int(os.environ.get("PORT", 10000))
         app.run(host="0.0.0.0", port=port)
 
+    # Jalankan Flask & self-ping di background thread
     threading.Thread(target=keep_alive, daemon=True).start()
     threading.Thread(target=run_flask, daemon=True).start()
 
+    # Jalankan polling di event loop utamanya
     import asyncio
 
-    async def run_polling_with_notify():
-        """Loop polling + notifikasi admin."""
-        while True:
-            try:
-                await application.bot.send_message(
-                    chat_id=int(ADMIN_CHAT_ID),
-                    text="✅ Bot Keuangan baru online dan siap digunakan."
-                )
-                await application.run_polling(timeout=30, drop_pending_updates=True)
-            except Exception as e:
-                logging.error(f"⚠️ Polling error: {e}")
-                try:
-                    await application.bot.send_message(
-                        chat_id=int(ADMIN_CHAT_ID),
-                        text=f"⚠️ Bot error: {e}. Akan restart 15 detik lagi."
-                    )
-                except:
-                    pass
-                await asyncio.sleep(15)
+    async def main():
+        await application.initialize()
+        await application.start()
+        logging.info("🤖 Bot polling dimulai...")
+        await application.updater.start_polling()
+        await asyncio.Event().wait()  # biar tetap jalan
 
-    asyncio.run(run_polling_with_notify())
+    asyncio.run(main())
