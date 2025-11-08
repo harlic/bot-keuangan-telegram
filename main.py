@@ -5,7 +5,7 @@ import logging
 import threading
 import time
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from flask import Flask
 from dotenv import load_dotenv
 import gspread
@@ -23,7 +23,7 @@ SPREADSHEET_NAME = os.getenv("SPREADSHEET_NAME")
 KATEGORI_SHEET   = os.getenv("KATEGORI_SHEET", "Kategori")
 DATA_SHEET       = os.getenv("DATA_SHEET", "Sheet1")
 BUDGET_SHEET     = os.getenv("BUDGET_SHEET", "Budget")
-ADMIN_CHAT_ID    = os.getenv("ADMIN_CHAT_ID")  # <- chat ID kamu sendiri
+ADMIN_CHAT_ID    = os.getenv("ADMIN_CHAT_ID")
 encoded_json     = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64")
 
 logging.basicConfig(
@@ -51,8 +51,7 @@ def init_sheets():
             "https://www.googleapis.com/auth/drive"
         ]
         creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-        gc = gspread.authorize(creds)
-        return gc
+        return gspread.authorize(creds)
     except Exception as e:
         logging.error("❌ Gagal inisialisasi Google Sheets", exc_info=e)
         raise SystemExit("❌ Tidak bisa lanjut tanpa Google Credentials!")
@@ -62,11 +61,9 @@ sheet_data = gc.open(SPREADSHEET_NAME).worksheet(DATA_SHEET)
 
 # ================== Helper Functions ==================
 def parse_amount(s: str) -> int:
-    """Ubah string angka (dengan titik/koma) jadi int."""
     return int(s.replace(",", "").replace(".", "").strip())
 
 def load_kategori_list() -> list[str]:
-    """Ambil kategori terbaru dari sheet."""
     try:
         ks = gc.open(SPREADSHEET_NAME).worksheet(KATEGORI_SHEET)
         return [k.strip().lower() for k in ks.col_values(1)[1:] if k.strip()]
@@ -75,14 +72,13 @@ def load_kategori_list() -> list[str]:
         return []
 
 def load_budget_data() -> dict:
-    """Ambil data budget terbaru."""
     data = {}
     try:
         budget_sheet = gc.open(SPREADSHEET_NAME).worksheet(BUDGET_SHEET)
         for row in budget_sheet.get_all_values()[1:]:
             if len(row) < 3:
                 continue
-            bulan    = row[0].strip()
+            bulan = row[0].strip()
             kategori = row[1].strip().lower()
             try:
                 nominal = parse_amount(row[2])
@@ -94,7 +90,6 @@ def load_budget_data() -> dict:
     return data
 
 def keep_alive():
-    """Self-ping agar Render tidak sleep."""
     url = "https://bot-keuangan-telegram.onrender.com/ping"
     while True:
         try:
@@ -109,7 +104,6 @@ def keep_alive():
 
 # ================== Telegram Handlers ==================
 async def notify_admin(context: ContextTypes.DEFAULT_TYPE, message: str):
-    """Kirim pesan ke admin saat restart atau error."""
     if ADMIN_CHAT_ID:
         try:
             await context.bot.send_message(chat_id=int(ADMIN_CHAT_ID), text=message)
@@ -139,13 +133,15 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
     try:
         now = datetime.now()
         if tipe == "mingguan":
-            start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0)
-            end = now.replace(hour=23, minute=59, second=59)
+            start = (now - timedelta(days=now.weekday())).date()
+            end = now.date() + timedelta(days=1)
             bulan_str = None
         elif tipe == "bulanan":
-            start = now.replace(day=1, hour=0, minute=0, second=0)
-            end = (start.replace(month=start.month + 1) if start.month < 12
-                   else start.replace(year=start.year + 1, month=1))
+            start = date(now.year, now.month, 1)
+            if now.month == 12:
+                end = date(now.year + 1, 1, 1)
+            else:
+                end = date(now.year, now.month + 1, 1)
             bulan_str = start.strftime("%Y-%m")
             budget_data = load_budget_data()
         else:
@@ -156,7 +152,7 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
         data = []
         for r in rows:
             try:
-                tanggal = datetime.strptime(r[0].strip(), "%Y-%m-%d")
+                tanggal = datetime.strptime(r[0].strip(), "%Y-%m-%d").date()
                 if start <= tanggal < end:
                     data.append(r)
             except Exception:
@@ -174,10 +170,10 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
             key = r[3].strip().lower()
             per_kat[key] = per_kat.get(key, 0) + nominal
 
-        msg = f"📊 Rekap {tipe.capitalize()} (mulai {start.strftime('%Y-%m-%d')}):\n"
+        msg = f"📊 Rekap {tipe.capitalize()} (mulai {start}):\n"
         for k, v in per_kat.items():
             if tipe == "bulanan":
-                budget = budget_data.get((bulan_str, k)) if bulan_str else None
+                budget = budget_data.get((bulan_str, k))
                 if budget is not None:
                     msg += f"- {k.title()}: Rp{v:,} / Rp{budget:,}\n"
                 else:
@@ -245,18 +241,15 @@ if __name__ == "__main__":
         port = int(os.environ.get("PORT", 10000))
         app.run(host="0.0.0.0", port=port)
 
-    # Jalankan Flask & self-ping di background thread
     threading.Thread(target=keep_alive, daemon=True).start()
     threading.Thread(target=run_flask, daemon=True).start()
 
-    # Jalankan polling di event loop utamanya
     import asyncio
-
     async def main():
         await application.initialize()
         await application.start()
         logging.info("🤖 Bot polling dimulai...")
         await application.updater.start_polling()
-        await asyncio.Event().wait()  # biar tetap jalan
+        await asyncio.Event().wait()
 
     asyncio.run(main())
