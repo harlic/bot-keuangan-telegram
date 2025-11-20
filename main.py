@@ -163,12 +163,31 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
 
         data = []
         for r in rows:
-            try:
-                tgl = datetime.strptime(r[0], "%Y-%m-%d")
-                if start <= tgl < end:
-                    data.append(r)
-            except:
+
+            raw_date = (
+                r[0]
+                .strip()
+                .replace("'", "")
+                .replace("’", "")
+                .replace("‘", "")
+                .strip()
+            )
+
+            parsed = None
+            for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y", "%d/%m/%Y"):
+                try:
+                    parsed = datetime.strptime(raw_date, fmt)
+                    break
+                except:
+                    pass
+
+            if not parsed:
+                logging.warning(f"⚠️ Tidak bisa parse tanggal: {raw_date}")
                 continue
+
+            if start <= parsed < end:
+                data.append(r)
+
 
         if not data:
             await update.message.reply_text("📭 Tidak ada transaksi pada periode ini.")
