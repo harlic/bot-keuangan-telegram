@@ -129,7 +129,59 @@ async def kategori_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     daftar = "\n".join(f"- {k.title()}" for k in kategori_list)
     await update.message.reply_text("*Kategori:*\n" + daftar, parse_mode="Markdown")
 
-async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
+# ================== Bulan Helpers ==================
+BULAN_MAP = {
+    "jan": 1, "januari": 1,
+    "feb": 2, "februari": 2,
+    "mar": 3, "maret": 3,
+    "apr": 4, "april": 4,
+    "mei": 5,
+    "jun": 6, "juni": 6,
+    "jul": 7, "juli": 7,
+    "agu": 8, "agustus": 8,
+    "sep": 9, "sept": 9, "september": 9,
+    "okt": 10, "oktober": 10,
+    "nov": 11, "november": 11,
+    "des": 12, "desember": 12,
+}
+
+def extract_available_months() -> list[str]:
+    """Ambil daftar bulan unik dari Sheet1 dalam format YYYY-MM."""
+    months = set()
+    rows = sheet_data.get_all_values()[1:]
+    for r in rows:
+        try:
+            d = datetime.strptime(r[0].strip(), "%Y-%m-%d")
+            months.add(d.strftime("%Y-%m"))
+        except:
+            pass
+    return sorted(months, reverse=True)
+
+def parse_month_arg(arg: str) -> str | None:
+    """Konversi input bulan menjadi YYYY-MM."""
+    arg = arg.lower().strip()
+
+    if arg.count("-") == 1:  # sudah YYYY-MM
+        try:
+            datetime.strptime(arg, "%Y-%m")
+            return arg
+        except:
+            return None
+
+    parts = arg.split()
+    if len(parts) == 1:
+        bulan = BULAN_MAP.get(parts[0][:3])
+        if bulan:
+            year = datetime.now().year
+            return f"{year}-{bulan:02d}"
+    elif len(parts) == 2:
+        bulan = BULAN_MAP.get(parts[0][:3])
+        if bulan and parts[1].isdigit():
+            return f"{parts[1]}-{bulan:02d}"
+
+    return None
+
+async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str, bulan_override: str = None):
     try:
         now = datetime.now()
         if tipe == "mingguan":
@@ -137,13 +189,24 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str):
             end = now.date() + timedelta(days=1)
             bulan_str = None
         elif tipe == "bulanan":
-            start = date(now.year, now.month, 1)
-            if now.month == 12:
+            if bulan_override:  # rekap bulan tertentu
+                tahun, bulan = bulan_override.split("-")
+                tahun, bulan = int(tahun), int(bulan)
+                start = date(tahun, bulan, 1)
+                if bulan == 12:
+                end = date(tahun + 1, 1, 1)
+                else:
+                end = date(tahun, bulan + 1, 1)
+                bulan_str = bulan_override
+            else:  # bulan berjalan
+                start = date(now.year, now.month, 1)
+                if now.month == 12:
                 end = date(now.year + 1, 1, 1)
-            else:
+                else:
                 end = date(now.year, now.month + 1, 1)
-            bulan_str = start.strftime("%Y-%m")
+                bulan_str = start.strftime("%Y-%m")
             budget_data = load_budget_data()
+
         else:
             await update.message.reply_text("❌ Jenis rekap tidak dikenal.")
             return
@@ -200,7 +263,32 @@ async def rekap_mingguan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await rekap(update, context, "mingguan")
 
 async def rekap_bulanan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await rekap(update, context, "bulanan")
+    args = context.args
+
+    # Jika ada argumen → rekap bulan tertentu
+    if args:
+        bulan_arg = " ".join(args)
+        bulan_str = parse_month_arg(bulan_arg)
+
+        if not bulan_str:
+            await update.message.reply_text("❌ Format bulan tidak dikenali.\nContoh:\n`/rekapbulan 2025-09`\n`/rekapbulan november`")
+            return
+
+        await rekap(update, context, "bulanan", bulan_override=bulan_str)
+        return
+
+    # Jika tanpa argumen → tampilkan daftar bulan
+    months = extract_available_months()
+    if not months:
+        await update.message.reply_text("📭 Belum ada data bulan.")
+        return
+
+    daftar = "\n".join(f"- `/rekapbulan {m}`" for m in months)
+    await update.message.reply_text(
+        "📅 Pilih bulan untuk rekap:\n" + daftar,
+        parse_mode="Markdown"
+    )
+
 
 async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
