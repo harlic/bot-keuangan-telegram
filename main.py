@@ -194,16 +194,16 @@ async def rekap(update: Update, context: ContextTypes.DEFAULT_TYPE, tipe: str, b
                 tahun, bulan = int(tahun), int(bulan)
                 start = date(tahun, bulan, 1)
                 if bulan == 12:
-                end = date(tahun + 1, 1, 1)
+                    end = date(tahun + 1, 1, 1)
                 else:
-                end = date(tahun, bulan + 1, 1)
+                    end = date(tahun, bulan + 1, 1)
                 bulan_str = bulan_override
             else:  # bulan berjalan
                 start = date(now.year, now.month, 1)
                 if now.month == 12:
-                end = date(now.year + 1, 1, 1)
+                    end = date(now.year + 1, 1, 1)
                 else:
-                end = date(now.year, now.month + 1, 1)
+                    end = date(now.year, now.month + 1, 1)
                 bulan_str = start.strftime("%Y-%m")
             budget_data = load_budget_data()
 
